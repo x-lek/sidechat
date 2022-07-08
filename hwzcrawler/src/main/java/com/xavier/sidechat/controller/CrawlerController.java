@@ -35,7 +35,7 @@ public class CrawlerController {
 
         if(threadOptional.isPresent()) {
             log.info("Crawling post from thread {}", threadId);
-            List<Post> postList = crawlerService.getPostFromThread(threadOptional.get());
+            List<Post> postList = crawlerService.processThread(threadOptional.get());
             log.info("Crawled {} posts from thread {}", postList.size(), threadOptional.get().getTitle());
 
 //            for(Post p : postList) {

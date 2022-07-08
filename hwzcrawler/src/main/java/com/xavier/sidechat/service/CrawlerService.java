@@ -11,17 +11,29 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import javax.print.Doc;
 import java.io.IOException;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 @Slf4j
 @Service
 public class CrawlerService {
+
+    @Scheduled(cron = "0 0/60 * * * ?")
+    public void doProcessTop20Pages() {
+        this.processTopPages(20);
+    }
+
     private final String USER_AGENT = "Mozilla/5.0 (Windows; U; WindowsNT 5.1; en-US; rv1.8.1.6) Gecko/20070725 Firefox/2.0.0.6";
 
     private final PostRepository postRepository;
@@ -32,22 +44,24 @@ public class CrawlerService {
         this.threadRepository = threadRepository;
     }
 
-    SimpleDateFormat threadDateFormatter = new SimpleDateFormat("MMM dd, yyyy 'at' hh:mm aa");
+    SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("yyyy-MM-dd'T'hh:mm:ssXXX");
+    //SimpleDateFormat threadDateFormatter = new SimpleDateFormat("MMM dd, yyyy 'at' hh:mm aa");
 
     public void processTopPages(int pages) {
         // Crawl thread information within top X pages
-        List<Thread> threadList = this.getThreadInPages(pages);
+        List<Thread> threadList = this.getAllThreadsInTopPages(pages);
         threadRepository.saveAll(threadList);
 
         // Determine if thread has new posts
-        for(Thread t : threadList) {
-            log.info("Processing thread {}", t.getTitle());
-            List<Post> postList = this.getPostFromThread(t);
-            log.info("Crawled {} posts from thread {}", postList.size(), t.getTitle());
-        }
+        List<Post> postList = StreamSupport.stream(threadList.spliterator(), true)
+                .map(this::processThread)
+                .flatMap(posts -> posts.stream())
+                .collect(Collectors.toList());
+
+        log.info("Captured {} posts", postList.size());
     }
 
-    private List<Thread> getThreadInPages(int pages) {
+    private List<Thread> getAllThreadsInTopPages(int pages) {
         final String url = "https://forums.hardwarezone.com.sg/eat-drink-man-woman-16/index%d.html";
 
         List<Thread> threadList = new ArrayList<>();
@@ -58,7 +72,7 @@ public class CrawlerService {
                 document = Jsoup.connect(currentPageUrl)
                         .userAgent(USER_AGENT)
                         .get();
-                log.info("Processing page #{} at {}", i, currentPageUrl);
+                log.debug("Processing page #{} at {}", i, currentPageUrl);
 
                 Elements threadsObjects = document.select(
                         "div.structItemContainer-group.js-threadList > " +
@@ -76,22 +90,18 @@ public class CrawlerService {
                             "div.structItem-minor > " +
                                         "ul.structItem-parts > " +
                                         "li > a.username").text();
-                    Date threadStartDate = new Date();
-                    try {
-                        threadStartDate = threadDateFormatter.parse(
+                    Date threadStartDate = new Date(Long.parseLong((
                                 t.select("div.structItem-minor > " +
-                                                    "ul.structItem-parts > " +
-                                                    "li.structItem-startDate > a > time")
-                                        .attr("title"));
-                    } catch (ParseException ignored) {
-                        ignored.printStackTrace();
-                    }
+                                                "ul.structItem-parts > " +
+                                                "li.structItem-startDate > a > time")
+                                        .attr("data-time"))) * 1000);
+
                     Date threadLastModifiedDate = new Date();
                     try {
-                        threadLastModifiedDate = threadDateFormatter.parse(
-                                t.select("div.structItem-cell.structItem-cell--latest > a")
-                                .attr("title"));
-                    } catch (ParseException ignored) {
+                        threadLastModifiedDate = new Date(Long.parseLong(
+                                t.select("div.structItem-cell.structItem-cell--latest > a > time")
+                                        .attr("data-time")) * 1000);
+                    } catch (NumberFormatException ignored) {
                         ignored.printStackTrace();
                     }
 
@@ -133,99 +143,121 @@ public class CrawlerService {
         return threadList;
     }
 
-    public List<Post> getPostFromThread(Thread thread) {
+    private Optional<Post> extractPostInfo(Element postElement, Thread thread) {
+        try {
+            Long id = Long.parseLong(postElement.attr("data-content").split("-")[1]);
+            String author = postElement.attr("data-author");
 
-        // TODO: Skip big thread first
-        if(thread.getLastPage() > 10) {
+            // 3 user extra info, 1. joined, 2. messages, 3. reaction
+            Elements userExtraInfo = postElement.select("div.message-userExtras > dl");
+            Long authorPostCount = Long.parseLong(
+                    userExtraInfo.get(1)//??
+                            .select("dd").text()
+                            .replace(",", ""));
+
+            Date publishedDate = new Date(Long.parseLong(
+                        postElement.select("time").attr("data-time").trim()) * 1000);
+            String publishedDateString = postElement.select("time").attr("title").trim();
+
+            int localPostId = Integer.parseInt(
+                    postElement
+                            .select("ul.message-attribution-opposite.message-attribution-opposite--list > li")
+                            .get(1).text().replaceAll("[#,]", ""));
+
+            Element bodyElement = postElement.select("div.bbWrapper").first();
+
+            String text = bodyElement.text();
+            String html = bodyElement.html();
+
+            List<Image> imageList = new ArrayList<>();
+            for (Element e : bodyElement.select("div.bbImageWrapper")) {
+                imageList.add(new Image(e.attr("data-src"), e.attr("title")));
+            }
+
+            List<Quote> quoteList = new ArrayList<>();
+            for (Element e : bodyElement.select("blockquote")) {
+                try {
+                    Element quoteHeaderElement = e.select("a.bbCodeBlock-sourceJump").first();
+                    String postId = quoteHeaderElement.attr("data-content-selector").replaceAll("#post-", "");
+                    String quoteAuthor = quoteHeaderElement.text().replaceAll(" said:", "");
+                    String quoteText = e.select("div.bbCodeBlock-content").text()
+                            .replace(quoteHeaderElement.text(), "")
+                            .replace("Click to expand...", "")
+                            .trim();
+
+                    // remove quote text from text body
+                    text = text
+                            .replace(quoteHeaderElement.text(), "")
+                            .replace(quoteText, "")
+                            .replace("Click to expand...", "")
+                            .trim();
+
+                    quoteList.add(new Quote(quoteAuthor, postId, quoteText));
+                } catch (Exception ignored) {
+                    ignored.printStackTrace();
+                }
+            }
+
+            Post post = Post.builder()
+                    .id(id)
+                    .threadId(thread.getId())
+                    .threadTitle(thread.getTitle())
+                    .localPostId(localPostId)
+                    .author(author)
+                    .authorPostCount(authorPostCount)
+                    .publishedDate(publishedDate)
+                    .publishedDateString(publishedDateString)
+                    .text(text)
+                    .html(html)
+                    .images(imageList)
+                    .quotes(quoteList)
+                    .build();
+
+            return Optional.of(post);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return Optional.empty();
+        }
+    }
+
+    public List<Post> processThreadPage(Thread thread, Long page) {
+        List<Post> postListByPage = new ArrayList<>();
+
+        Document document = null;
+        try {
+            String currentPageUrl = String.format(thread.getUrl() + "page-%d", page);
+            document = Jsoup.connect(currentPageUrl)
+                    .userAgent(USER_AGENT)
+                    .get();
+            log.debug("Processing page #{}/{} of thread {}", page, thread.getLastPage(), thread.getTitle());
+
+            Elements postsObjects = document.select(
+                    "div.block-body.js-replyNewMessageContainer > " +
+                            "article.message--post");
+
+            Stream<Element> elementStream = StreamSupport.stream(postsObjects.spliterator(), false);
+            elementStream
+                    .map(element -> this.extractPostInfo(element, thread))
+                    .filter(optionalPost -> optionalPost.isPresent())
+                    .forEach(post -> {
+                        postListByPage.add(post.get());
+                    });
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        postRepository.saveAll(postListByPage);
+        return postListByPage;
+    }
+
+    public List<Post> processThread(Thread thread) {
+        if(thread.getLastPage()>100) {
             return new ArrayList<>();
         }
-
-        List<Post> postList = new ArrayList<>();
-
-        // Upsert post page by page starting from the last page, break upon detecting duplicates
-        for(long i = 1; i<=thread.getLastPage(); i++) {
-            List<Post> postListByPage = new ArrayList<>();
-
-            Document document = null;
-            try {
-                String currentPageUrl = String.format(thread.getUrl() + "page-%d", i);
-                document = Jsoup.connect(currentPageUrl)
-                        .userAgent(USER_AGENT)
-                        .get();
-                log.info("Processing page #{}/{} of thread {}", i, thread.getLastPage(), thread.getTitle());
-
-                Elements postsObjects = document.select(
-                        "div.block-body.js-replyNewMessageContainer > " +
-                                    "article.message--post");
-
-                for(Element t : postsObjects) {
-                    Long id = Long.parseLong(t.attr("data-content").split("-")[1]);
-                    String author = t.attr("data-author");
-
-                    // 3 user extra info, 1. joined, 2. messages, 3. reaction
-                    Elements userExtraInfo = t.select("div.message-userExtras > dl");
-                    Long authorPostCount = Long.parseLong(
-                            userExtraInfo.get(1)
-                                    .select("dd").text()
-                                    .replaceAll(",",""));
-
-                    Date publishedDate = new Date();
-                    try {
-                        publishedDate = threadDateFormatter.parse(
-                                t.select("time.u-dt")
-                                        .attr("title"));
-                    } catch (ParseException ignored) {
-                        ignored.printStackTrace();
-                    }
-
-                    Element bodyElement = t.select("div.bbWrapper").first();
-
-                    String text = bodyElement.text();
-                    String html = bodyElement.html();
-
-                    List<Image> imageList = new ArrayList<>();
-                    for(Element e : bodyElement.select("div.bbImageWrapper")) {
-                        imageList.add(new Image(e.attr("data-src"), e.attr("title")));
-                    }
-
-                    System.out.println(">????????????>>> " + id);
-                    List<Quote> quoteList = new ArrayList<>();
-                    for(Element e : bodyElement.select("blockquote")) {
-                        try {
-                            Element quoteHeaderElement = e.select("a.bbCodeBlock-sourceJump").first();
-                            System.out.println(quoteHeaderElement.text());
-                            String postId = quoteHeaderElement.attr("data-content-selector").split("-")[1];
-                            String quoteAuthor = quoteHeaderElement.text().split(" said:")[0];
-                            String quoteText = e.select("div.bbCodeBlock-content")
-                                    .text().replaceAll("Click to expand...", "");
-                            quoteList.add(new Quote(quoteAuthor, postId, quoteText));
-                        } catch (Exception errorQuote) {
-                            errorQuote.printStackTrace();
-                        }
-                    }
-
-                    Post post = Post.builder()
-                            .id(id)
-                            .threadId(thread.getId())
-                            .author(author)
-                            .authorPostCount(authorPostCount)
-                            .publishedDate(publishedDate)
-                            .text(text)
-                            .html(html)
-                            .images(imageList)
-                            .quotes(quoteList)
-                            .build();
-
-                    postList.add(post);
-                    postListByPage.add(post);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            postRepository.saveAll(postListByPage);
-            postListByPage = new ArrayList<>();
-        }
-        return postList;
+        return StreamSupport.stream(LongStream.range(1, thread.getLastPage()).spliterator(), false)
+                .map(pageNum -> this.processThreadPage(thread, pageNum))
+                .flatMap(posts -> posts.stream())
+                .collect(Collectors.toList());
     }
 
     private Long getLongIgnoreLastChar(String str) { return Long.parseLong(str.substring(0, str.length() - 1)); }
@@ -238,6 +270,7 @@ public class CrawlerService {
                 try {
                     yield Long.parseLong(numString);
                 } catch (Exception pe) {
+                    pe.printStackTrace();
                     yield  0L;
                 }
             }
