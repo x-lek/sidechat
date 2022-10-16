@@ -6,15 +6,22 @@ import com.xavier.sidechat.entity.Quote;
 import com.xavier.sidechat.entity.Thread;
 import com.xavier.sidechat.repository.PostRepository;
 import com.xavier.sidechat.repository.ThreadRepository;
+import io.minio.*;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLConnection;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -29,6 +36,12 @@ import java.util.stream.StreamSupport;
 @Service
 public class CrawlerService {
 
+    @Value("${sidechat.crawler.url}")
+    private String crawlUrl;
+
+    @Value("${sidechat.crawler.max-thread-page}")
+    private Long crawlThreadMaxPage;
+
     @Scheduled(cron = "0 0/60 * * * ?")
     public void doProcessTop20Pages() {
         this.processTopPages(20);
@@ -38,10 +51,12 @@ public class CrawlerService {
 
     private final PostRepository postRepository;
     private final ThreadRepository threadRepository;
+    private final MinioClient minioClient;
 
-    public CrawlerService(PostRepository postRepository, ThreadRepository threadRepository) {
+    public CrawlerService(PostRepository postRepository, ThreadRepository threadRepository, MinioClient minioClient) {
         this.postRepository = postRepository;
         this.threadRepository = threadRepository;
+        this.minioClient = minioClient;
     }
 
     SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("yyyy-MM-dd'T'hh:mm:ssXXX");
@@ -62,13 +77,13 @@ public class CrawlerService {
     }
 
     private List<Thread> getAllThreadsInTopPages(int pages) {
-        final String url = "https://forums.hardwarezone.com.sg/eat-drink-man-woman-16/index%d.html";
+        //final String url = "https://forums.hardwarezone.com.sg/eat-drink-man-woman-16/index%d.html";
 
         List<Thread> threadList = new ArrayList<>();
         for (int i = 1; i <= pages; i++) {
             Document document = null;
             try {
-                String currentPageUrl = String.format(url, i);
+                String currentPageUrl = String.format(crawlUrl, i);
                 document = Jsoup.connect(currentPageUrl)
                         .userAgent(USER_AGENT)
                         .get();
@@ -102,6 +117,7 @@ public class CrawlerService {
                                 t.select("div.structItem-cell.structItem-cell--latest > a > time")
                                         .attr("data-time")) * 1000);
                     } catch (NumberFormatException ignored) {
+                        log.warn("Unable to get thread last modified date");
                         ignored.printStackTrace();
                     }
 
@@ -121,6 +137,7 @@ public class CrawlerService {
                                             .attr("href")
                                             .split("page-")[1]);
                         } catch (Exception ignored) {
+                            log.warn("Unable to get last page");
                             ignored.printStackTrace();
                         }
                     }
@@ -171,13 +188,39 @@ public class CrawlerService {
 
             List<Image> imageList = new ArrayList<>();
             for (Element e : bodyElement.select("div.bbImageWrapper")) {
-                imageList.add(new Image(e.attr("data-src"), e.attr("title")));
+                // foreach image, download from data-src and putObject into MinIO
+                URL mediaUrl = new URL(e.attr("data-src"));
+
+                HttpURLConnection headMediaUrlConnection = (HttpURLConnection) mediaUrl.openConnection();
+                headMediaUrlConnection.setRequestMethod("HEAD");
+                headMediaUrlConnection.connect();
+                int contentLength = headMediaUrlConnection.getContentLength();
+                headMediaUrlConnection.disconnect();
+
+                try(InputStream in = mediaUrl.openStream()){
+                    if(!minioClient.bucketExists(BucketExistsArgs.builder().bucket(thread.getId()).build())) {
+                        minioClient.makeBucket(MakeBucketArgs.builder().bucket(thread.getId()).build());
+                    }
+                    minioClient.putObject(PutObjectArgs.builder()
+                            .bucket(thread.getId())
+                            .object(e.attr("title"))
+                            .stream(in, contentLength, -1)
+                            .build());
+                }
+                // prepare metadata for images[]
+                imageList.add(new Image(
+                        e.attr("data-src"),
+                        e.attr("title")
+                ));
             }
 
             List<Quote> quoteList = new ArrayList<>();
             for (Element e : bodyElement.select("blockquote")) {
                 try {
                     Element quoteHeaderElement = e.select("a.bbCodeBlock-sourceJump").first();
+                    if(quoteHeaderElement == null) {
+                        continue;
+                    }
                     String postId = quoteHeaderElement.attr("data-content-selector").replaceAll("#post-", "");
                     String quoteAuthor = quoteHeaderElement.text().replaceAll(" said:", "");
                     String quoteText = e.select("div.bbCodeBlock-content").text()
@@ -194,6 +237,7 @@ public class CrawlerService {
 
                     quoteList.add(new Quote(quoteAuthor, postId, quoteText));
                 } catch (Exception ignored) {
+                    log.warn("Unable to get quote element");
                     ignored.printStackTrace();
                 }
             }
@@ -215,6 +259,7 @@ public class CrawlerService {
 
             return Optional.of(post);
         } catch (Exception e) {
+            log.warn("Unable to create post");
             e.printStackTrace();
             return Optional.empty();
         }
@@ -251,7 +296,7 @@ public class CrawlerService {
     }
 
     public List<Post> processThread(Thread thread) {
-        if(thread.getLastPage()>100) {
+        if(thread.getLastPage() > crawlThreadMaxPage) {
             return new ArrayList<>();
         }
         return StreamSupport.stream(LongStream.range(1, thread.getLastPage()).spliterator(), false)
@@ -268,7 +313,7 @@ public class CrawlerService {
             case 'm' -> this.getLongIgnoreLastChar(numString) * 1000000;
             default -> {
                 try {
-                    yield Long.parseLong(numString);
+                    yield Long.parseLong(numString.replaceAll("[^0-9]", ""));
                 } catch (Exception pe) {
                     pe.printStackTrace();
                     yield  0L;
