@@ -1,0 +1,43 @@
+{
+     "type": "record",
+     "namespace": "com.xavier.sidechat",
+     "name": "PostAvro",
+     "version": "1",
+     "fields": [
+       { "name": "id", "type": "long", "doc": "Unique ID for each Post" },
+       { "name": "threadId", "type": "string", "doc": "Thread ID where post was published" },
+       { "name": "threadTitle", "type": "string", "doc": "Title of the published thread" },
+       { "name": "localPostId", "type": "int", "doc": "Localized ID of post in threads"},
+       { "name": "publishedDate", "type": {"type": "long", "logicalType": "time-millis"}},
+       { "name": "publishedDateString", "type": "string"},
+       { "name": "author", "type": "string", "doc": "Author name of the post" },
+       { "name": "authorPostCount", "type": "long"},
+       { "name": "html", "type": "string"},
+       { "name": "text", "type": "string"},
+       { "name": "images", "type": {
+         "type": "array",
+         "items": {
+           "name": "ImageAvro",
+           "type": "record",
+           "fields": [
+             { "name": "url", "type": "string"},
+             { "name": "title", "type": "string"}
+           ]
+         },
+         "default": null
+       }},
+       { "name": "quotes", "type": {
+         "type": "array",
+         "items": {
+           "name": "QuoteAvro",
+           "type": "record",
+           "fields": [
+             { "name": "author", "type": "string"},
+             { "name": "postId", "type": "string"},
+             { "name": "text", "type": "string"}
+           ]
+         },
+         "default": null
+       }}
+     ]
+}

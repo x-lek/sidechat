@@ -1,9 +1,13 @@
 package com.xavier.sidechat.service;
 
+import com.xavier.sidechat.ImageAvro;
+import com.xavier.sidechat.PostAvro;
+import com.xavier.sidechat.QuoteAvro;
 import com.xavier.sidechat.entity.Image;
 import com.xavier.sidechat.entity.Post;
 import com.xavier.sidechat.entity.Quote;
 import com.xavier.sidechat.entity.Thread;
+import com.xavier.sidechat.kafka.KafkaProducer;
 import com.xavier.sidechat.repository.PostRepository;
 import com.xavier.sidechat.repository.ThreadRepository;
 import io.minio.*;
@@ -53,10 +57,16 @@ public class CrawlerService {
     private final ThreadRepository threadRepository;
     private final MinioClient minioClient;
 
-    public CrawlerService(PostRepository postRepository, ThreadRepository threadRepository, MinioClient minioClient) {
+    private final KafkaProducer kafkaProducer;
+
+    public CrawlerService(PostRepository postRepository,
+                          ThreadRepository threadRepository,
+                          MinioClient minioClient,
+                          KafkaProducer kafkaProducer) {
         this.postRepository = postRepository;
         this.threadRepository = threadRepository;
         this.minioClient = minioClient;
+        this.kafkaProducer = kafkaProducer;
     }
 
     SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("yyyy-MM-dd'T'hh:mm:ssXXX");
@@ -72,6 +82,8 @@ public class CrawlerService {
                 .map(this::processThread)
                 .flatMap(posts -> posts.stream())
                 .collect(Collectors.toList());
+
+        //postList.forEach(post -> kafkaProducer.send(post));
 
         log.info("Captured {} posts", postList.size());
     }
@@ -197,6 +209,8 @@ public class CrawlerService {
                 int contentLength = headMediaUrlConnection.getContentLength();
                 headMediaUrlConnection.disconnect();
 
+                // check contentLength is not valid, download and saveObject
+
                 try(InputStream in = mediaUrl.openStream()){
                     if(!minioClient.bucketExists(BucketExistsArgs.builder().bucket(thread.getId()).build())) {
                         minioClient.makeBucket(MakeBucketArgs.builder().bucket(thread.getId()).build());
@@ -256,6 +270,34 @@ public class CrawlerService {
                     .images(imageList)
                     .quotes(quoteList)
                     .build();
+
+            PostAvro postAvro = PostAvro.newBuilder()
+                    .setId(id)
+                    .setThreadId(thread.getId())
+                    .setThreadTitle(thread.getTitle())
+                    .setLocalPostId(localPostId)
+                    .setAuthor(author)
+                    .setAuthorPostCount(authorPostCount)
+                    .setPublishedDate(publishedDate.getTime())
+                    .setPublishedDateString(publishedDateString)
+                    .setText(text)
+                    .setHtml(html)
+                    .setImages(imageList.stream().map(
+                            image ->
+                                ImageAvro.newBuilder()
+                                        .setTitle(image.getTitle())
+                                        .setUrl(image.getUrl())
+                                        .build()
+                    ).toList())
+                    .setQuotes(quoteList.stream().map(
+                            quote -> QuoteAvro.newBuilder()
+                                    .setPostId(quote.getPostId())
+                                    .setAuthor(quote.getAuthor())
+                                    .setText(quote.getText())
+                                    .build()
+                    ).toList())
+                    .build();
+            kafkaProducer.send(postAvro);
 
             return Optional.of(post);
         } catch (Exception e) {
