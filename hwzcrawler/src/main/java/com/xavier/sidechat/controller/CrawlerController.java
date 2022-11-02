@@ -29,27 +29,24 @@ public class CrawlerController {
         this.threadRepository = threadRepository;
     }
 
-    @GetMapping("/api/threads")
-    public void crawlThread(@RequestParam String threadId) {
-        Optional<Thread> threadOptional = threadRepository.findById(threadId);
-
-        if(threadOptional.isPresent()) {
-            log.info("Crawling post from thread {}", threadId);
-            List<Post> postList = crawlerService.processThread(threadOptional.get());
-            log.info("Crawled {} posts from thread {}", postList.size(), threadOptional.get().getTitle());
-
-//            for(Post p : postList) {
-//                log.info(p.toString());
-//            }
-        } else {
-            throw new ResponseStatusException(
-                    HttpStatus.NOT_FOUND, "thread not found"
-            );
-        }
-    }
+//    @GetMapping("/api/threads")
+//    public void crawlThread(@RequestParam String threadId) {
+//        //Optional<Thread> threadOptional = threadRepository.findById(threadId);
+//
+//        if(threadOptional.isPresent()) {
+//            log.info("Crawling post from thread {}", threadId);
+//            List<Post> postList = crawlerService.processThread(threadOptional.get());
+//            log.info("Crawled {} posts from thread {}", postList.size(), threadOptional.get().getTitle());
+//
+//        } else {
+//            throw new ResponseStatusException(
+//                    HttpStatus.NOT_FOUND, "thread not found"
+//            );
+//        }
+//    }
 
     @GetMapping("/api/pages")
     public void crawlPage(@RequestParam int p) {
-        crawlerService.processTopPages(p);
+        crawlerService.processTopXForumPages(p);
     }
 }

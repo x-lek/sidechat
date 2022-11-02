@@ -1,6 +1,5 @@
 package com.xavier.sidechat.kafka;
 
-import com.xavier.sidechat.PostAvro;
 import com.xavier.sidechat.entity.Post;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -12,11 +11,9 @@ import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Properties;
 
 @EnableKafka
 @Configuration
@@ -29,7 +26,7 @@ public class KafkaProducerConfig {
     private String registryUrl;
 
     @Bean
-    public ProducerFactory<String, PostAvro> postProducerFactory() {
+    public ProducerFactory<String, Post> postProducerFactory() {
         Map<String, Object> configs = new HashMap<>();
         configs.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapAddress);
         configs.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -40,7 +37,7 @@ public class KafkaProducerConfig {
     }
 
     @Bean
-    public KafkaTemplate<String, PostAvro> postKafkaProducer() {
+    public KafkaTemplate<String, Post> postKafkaProducer() {
         return new KafkaTemplate<>(postProducerFactory());
     }
 }

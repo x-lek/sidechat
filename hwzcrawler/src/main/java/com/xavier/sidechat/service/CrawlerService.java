@@ -1,31 +1,21 @@
 package com.xavier.sidechat.service;
 
-import com.xavier.sidechat.ImageAvro;
-import com.xavier.sidechat.PostAvro;
-import com.xavier.sidechat.QuoteAvro;
 import com.xavier.sidechat.entity.Image;
 import com.xavier.sidechat.entity.Post;
 import com.xavier.sidechat.entity.Quote;
 import com.xavier.sidechat.entity.Thread;
 import com.xavier.sidechat.kafka.KafkaProducer;
-import com.xavier.sidechat.repository.PostRepository;
-import com.xavier.sidechat.repository.ThreadRepository;
-import io.minio.*;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLConnection;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -43,39 +33,33 @@ public class CrawlerService {
     @Value("${sidechat.crawler.url}")
     private String crawlUrl;
 
+    @Value("${hwzcrawler.thread.url}")
+    private String crawlThreadUrl;
+
     @Value("${sidechat.crawler.max-thread-page}")
     private Long crawlThreadMaxPage;
 
     @Scheduled(cron = "0 0/60 * * * ?")
     public void doProcessTop20Pages() {
-        this.processTopPages(20);
+        this.processTopXForumPages(20);
     }
 
     private final String USER_AGENT = "Mozilla/5.0 (Windows; U; WindowsNT 5.1; en-US; rv1.8.1.6) Gecko/20070725 Firefox/2.0.0.6";
 
-    private final PostRepository postRepository;
-    private final ThreadRepository threadRepository;
-    private final MinioClient minioClient;
-
     private final KafkaProducer kafkaProducer;
 
-    public CrawlerService(PostRepository postRepository,
-                          ThreadRepository threadRepository,
-                          MinioClient minioClient,
-                          KafkaProducer kafkaProducer) {
-        this.postRepository = postRepository;
-        this.threadRepository = threadRepository;
-        this.minioClient = minioClient;
+    public CrawlerService(KafkaProducer kafkaProducer) {
         this.kafkaProducer = kafkaProducer;
     }
 
     SimpleDateFormat dateTimeFormatter = new SimpleDateFormat("yyyy-MM-dd'T'hh:mm:ssXXX");
     //SimpleDateFormat threadDateFormatter = new SimpleDateFormat("MMM dd, yyyy 'at' hh:mm aa");
 
-    public void processTopPages(int pages) {
+    /* Main Function, identify list of threads
+       Parallelized collection of job by threads; 1 process per forumPage */
+    public void processTopXForumPages(int pages) {
         // Crawl thread information within top X pages
         List<Thread> threadList = this.getAllThreadsInTopPages(pages);
-        threadRepository.saveAll(threadList);
 
         // Determine if thread has new posts
         List<Post> postList = StreamSupport.stream(threadList.spliterator(), true)
@@ -83,13 +67,12 @@ public class CrawlerService {
                 .flatMap(posts -> posts.stream())
                 .collect(Collectors.toList());
 
-        //postList.forEach(post -> kafkaProducer.send(post));
-
-        log.info("Captured {} posts", postList.size());
+        log.info("Collected {} posts", postList.size());
     }
 
+    /* Collect thread information within top pages */
     private List<Thread> getAllThreadsInTopPages(int pages) {
-        //final String url = "https://forums.hardwarezone.com.sg/eat-drink-man-woman-16/index%d.html";
+        //https://forums.hardwarezone.com.sg/eat-drink-man-woman-16/index%d.html
 
         List<Thread> threadList = new ArrayList<>();
         for (int i = 1; i <= pages; i++) {
@@ -106,7 +89,7 @@ public class CrawlerService {
                                     "div.structItem--thread");
 
                 for (Element t : threadsObjects) {
-                    String threadUrl = String.format("https://forums.hardwarezone.com.sg%s",
+                    String threadUrl = String.format(crawlThreadUrl,
                             t.select("div.structItem-title > a")
                                     .attr("href"));
 
@@ -172,6 +155,7 @@ public class CrawlerService {
         return threadList;
     }
 
+    /* Extract individual post information */
     private Optional<Post> extractPostInfo(Element postElement, Thread thread) {
         try {
             Long id = Long.parseLong(postElement.attr("data-content").split("-")[1]);
@@ -203,24 +187,24 @@ public class CrawlerService {
                 // foreach image, download from data-src and putObject into MinIO
                 URL mediaUrl = new URL(e.attr("data-src"));
 
-                HttpURLConnection headMediaUrlConnection = (HttpURLConnection) mediaUrl.openConnection();
-                headMediaUrlConnection.setRequestMethod("HEAD");
-                headMediaUrlConnection.connect();
-                int contentLength = headMediaUrlConnection.getContentLength();
-                headMediaUrlConnection.disconnect();
+//                HttpURLConnection headMediaUrlConnection = (HttpURLConnection) mediaUrl.openConnection();
+//                headMediaUrlConnection.setRequestMethod("HEAD");
+//                headMediaUrlConnection.connect();
+//                int contentLength = headMediaUrlConnection.getContentLength();
+//                headMediaUrlConnection.disconnect();
+//
+//                // check contentLength is not valid, download and saveObject
+//                try(InputStream in = mediaUrl.openStream()){
+//                    if(!minioClient.bucketExists(BucketExistsArgs.builder().bucket(thread.getId()).build())) {
+//                        minioClient.makeBucket(MakeBucketArgs.builder().bucket(thread.getId()).build());
+//                    }
+//                    minioClient.putObject(PutObjectArgs.builder()
+//                            .bucket(thread.getId())
+//                            .object(e.attr("title"))
+//                            .stream(in, contentLength, -1)
+//                            .build());
+//                }
 
-                // check contentLength is not valid, download and saveObject
-
-                try(InputStream in = mediaUrl.openStream()){
-                    if(!minioClient.bucketExists(BucketExistsArgs.builder().bucket(thread.getId()).build())) {
-                        minioClient.makeBucket(MakeBucketArgs.builder().bucket(thread.getId()).build());
-                    }
-                    minioClient.putObject(PutObjectArgs.builder()
-                            .bucket(thread.getId())
-                            .object(e.attr("title"))
-                            .stream(in, contentLength, -1)
-                            .build());
-                }
                 // prepare metadata for images[]
                 imageList.add(new Image(
                         e.attr("data-src"),
@@ -256,58 +240,46 @@ public class CrawlerService {
                 }
             }
 
-            Post post = Post.builder()
-                    .id(id)
-                    .threadId(thread.getId())
-                    .threadTitle(thread.getTitle())
-                    .localPostId(localPostId)
-                    .author(author)
-                    .authorPostCount(authorPostCount)
-                    .publishedDate(publishedDate)
-                    .publishedDateString(publishedDateString)
-                    .text(text)
-                    .html(html)
-                    .images(imageList)
-                    .quotes(quoteList)
-                    .build();
-
-            PostAvro postAvro = PostAvro.newBuilder()
+            Post post = Post.newBuilder()
                     .setId(id)
                     .setThreadId(thread.getId())
                     .setThreadTitle(thread.getTitle())
                     .setLocalPostId(localPostId)
                     .setAuthor(author)
                     .setAuthorPostCount(authorPostCount)
-                    .setPublishedDate(publishedDate.getTime())
+                    .setPublishedDate(publishedDate.toInstant())
                     .setPublishedDateString(publishedDateString)
                     .setText(text)
                     .setHtml(html)
                     .setImages(imageList.stream().map(
                             image ->
-                                ImageAvro.newBuilder()
+                                Image.newBuilder()
                                         .setTitle(image.getTitle())
                                         .setUrl(image.getUrl())
                                         .build()
                     ).toList())
                     .setQuotes(quoteList.stream().map(
-                            quote -> QuoteAvro.newBuilder()
+                            quote -> Quote.newBuilder()
                                     .setPostId(quote.getPostId())
                                     .setAuthor(quote.getAuthor())
                                     .setText(quote.getText())
                                     .build()
                     ).toList())
                     .build();
-            kafkaProducer.send(postAvro);
+
+            /* Send collected information to kafka */
+            kafkaProducer.send(post);
 
             return Optional.of(post);
         } catch (Exception e) {
-            log.warn("Unable to create post");
+            log.error("Unable to create post: {}", e.getMessage());
             e.printStackTrace();
             return Optional.empty();
         }
     }
 
-    public List<Post> processThreadPage(Thread thread, Long page) {
+    /* Parallelized collection of post within page; 1 process per post collection */
+    private List<Post> processThreadPage(Thread thread, Long page) {
         List<Post> postListByPage = new ArrayList<>();
 
         Document document = null;
@@ -333,10 +305,11 @@ public class CrawlerService {
         } catch (IOException e) {
             e.printStackTrace();
         }
-        postRepository.saveAll(postListByPage);
         return postListByPage;
     }
 
+    /* Parallelized collection of thread by pages; 1 process per page
+    *  Main Function for post collection of specific thread */
     public List<Post> processThread(Thread thread) {
         if(thread.getLastPage() > crawlThreadMaxPage) {
             return new ArrayList<>();
@@ -363,179 +336,4 @@ public class CrawlerService {
             }
         };
     }
-
-
-
-//    private long convertNumberStringToLong(String number) {
-//        return Long.parseLong(number.replaceAll(",", ""));
-//    }
-//
-//    private Date convertJoinedDate(String joinedDate) throws ParseException {
-//        SimpleDateFormat df = new SimpleDateFormat("MMM yyyy");
-//        return df.parse(joinedDate.trim());
-//    }
-//
-//    private Date convertPostDate(String date) throws ParseException {
-//        String normalizedDate = date;
-//        if (date.contains("Yesterday") || date.contains("Today")) {
-//            SimpleDateFormat dateFormat = new SimpleDateFormat("dd-MM-yyyy, ");
-//            String time = date.split(",")[1].trim();
-//            Calendar c = Calendar.getInstance();
-//
-//            if (date.contains("Yesterday")) {
-//                c.add(Calendar.DATE, -1);
-//            }
-//
-//            Date yesterday = c.getTime();
-//            normalizedDate = dateFormat.format(yesterday) + time;
-//        }
-//        SimpleDateFormat datetimeFormat = new SimpleDateFormat("dd-MM-yyyy, hh:mm aa");
-//        return datetimeFormat.parse(normalizedDate);
-//    }
-//
-//    public void crawlThread(String url) {
-//        List<Post> postList = new ArrayList<>();
-//        String currentUrl = url;
-//        int currentPage = 1;
-//
-//        // update currentPage is thread has been processed before
-//        Optional<Thread> t = threadRepository.findById(url);
-//        if (t.isPresent()) {
-//            currentPage = t.get().getPageLastProcessed();
-//        }
-//
-//        // update current url to page last processed
-//        currentUrl = currentUrl.replace(".html", String.format("-%d.html", currentPage));
-//
-//        while (!currentUrl.isEmpty()) {
-//            Document document = null;
-//            try {
-//                log.info("Processing thread URL {}", currentPage);
-//                document = Jsoup.connect(currentUrl).get();
-//
-//                // Crawl posts in page
-//                List<Post> crawledPost = this.crawlPostsFromPage(document, currentUrl);
-//                postList.addAll(crawledPost);
-//
-//                // Check for next page
-//                Elements nav = document.select("li[class=prevnext]");
-//                currentUrl = "";
-//                for (Element e : nav) {
-//                    if (e.text().contains("Next")) {
-//                        String uri = e.select("a[href]").attr("href");
-//                        currentUrl = String.format("https://forums.hardwarezone.com.sg%s", uri);
-//                        break;
-//                    }
-//                }
-//                if(!currentUrl.isEmpty()) {
-//                    currentPage+=1;
-//                }
-//            } catch (IOException e) {
-//                e.printStackTrace();
-//                break;
-//            }
-//        }
-//
-//        // based on last url update page last processed
-//        threadRepository.save(new Thread(url, currentPage));
-//        postRepository.saveAll(postList);
-//    }
-//
-//    private List<Post> crawlPostsFromPage(Document document, String url) {
-//        Pattern postCountPattern = Pattern.compile("^\\/(\\d+)-post(\\d+)\\.html");
-//        List<Post> postList = new ArrayList<>();
-//
-//        String title = document.select("div#forum[class=inner] > h2[class=header-gray]").text();
-//        Elements postWrappers = document.getElementsByClass("post-wrapper");
-//        for (Element p : postWrappers) {
-//
-//            // Extract Post Number, Thread Number
-//            long globalPostNumber = 0L;
-//            long threadPostNumber = 0L;
-//            String postString = p.select("td.thead[align=right] > a").attr("href").trim();
-//            Matcher m = postCountPattern.matcher(postString);
-//            if (m.find()) {
-//                globalPostNumber = this.convertNumberStringToLong(m.group(1).trim());
-//                threadPostNumber = this.convertNumberStringToLong(m.group(2).trim());
-//            }
-//
-//            // Extract Post Datetime
-//            Date postDateTime = null;
-//            try {
-//                postDateTime = this.convertPostDate(p.select("td.thead").not("[align]").text().trim());
-//            } catch (ParseException e) {
-//                e.printStackTrace();
-//            }
-//
-//            // Extract Profile Details (userName, avatarUrl, status, postCount)
-//            String userName = p.select("a[class=bigusername]").text();
-//            String avatarUrl = p.select("div[class=smallfont] > a > img").attr("src");
-//            String[] profile = p.select("td[class=alt2] > div[class=smallfont]")
-//                    .text().split("Join Date: |Posts: ");
-//            String status = profile[0];
-//            long postCount = this.convertNumberStringToLong(profile[2].trim()); // 5,859
-//
-//            // Extract Profile Details (joinedDate)
-//            Date joinedDate = null; // Oct 2017
-//            try {
-//                joinedDate = this.convertJoinedDate(profile[1]);
-//            } catch (ParseException e) {
-//                e.printStackTrace();
-//            }
-//
-//            // Extract Quotes
-//            List<Quote> quoteList = new ArrayList<>();
-//            Elements quoteElements = p.select("td[class=alt1] > div.post_message > div.quote");
-//            for (Element q : quoteElements) {
-//                String quoteUser = q.select("span > strong").text();
-//                String quoteText = q.select("blockquote").text();
-//                quoteList.add(new Quote(quoteUser, quoteText));
-//            }
-//
-//            // Extract Images
-//            List<String> imageList = new ArrayList<>();
-//            Elements imageElements = p.select("td[class=alt1] > div.post_message > a > img");
-//            for (Element i : imageElements) {
-//                imageList.add(i.attr("src"));
-//            }
-//
-//            // Extract Text
-//            String text = p.select("td[class=alt1] > div.post_message").select("div").remove().first().text();
-//
-//            long id = globalPostNumber;
-//            Post post = new Post(id, title, url, threadPostNumber, postDateTime,
-//                    userName, avatarUrl, status, joinedDate, postCount, text, imageList, quoteList);
-//            postList.add(post);
-//        }
-//
-//        return postList;
-//    }
-//
-//    // Loop through HWZ by pages and identifying thread within page
-//    public void identifyThreadByPage(int pages) {
-//        final String url = "https://forums.hardwarezone.com.sg/eat-drink-man-woman-16/index%d.html";
-//
-//        for (int i = 1; i <= pages; i++) {
-//            Document document = null;
-//            try {
-//                String currentUrl = String.format(url, i);
-//                document = Jsoup.connect(currentUrl).get();
-//                log.info("Processing page #{} at {}", i, currentUrl);
-//
-//                //Elements threadWrappers = document.select("tbody#threadbits_forum_16 > tr").not("[class=hwz-sticky]").not("[class=hwz-promoted]");
-//                Elements threadsObject = document.select("div.structItem-title");
-//                log.info("Found {} thread(s) in page #{}", threadsObject.size(), i);
-//
-//                for (Element t : threadsObject) {
-//                    String threadUrl = String.format("https://forums.hardwarezone.com.sg%s", t.select("td[class=alt1] > div > a").attr("href"));
-//                    log.info("Tasking thread for processing {}, {}", t.text(), threadUrl);
-//                    this.crawlThread(threadUrl);
-//                }
-//            } catch (IOException e) {
-//                e.printStackTrace();
-//                break;
-//            }
-//        }
-//    }
-
 }
