@@ -1,4 +1,4 @@
-package com.xavier.sidechat;
+package com.sidechat;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

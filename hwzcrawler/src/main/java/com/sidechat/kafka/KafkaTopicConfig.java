@@ -1,4 +1,4 @@
-package com.xavier.sidechat.kafka;
+package com.sidechat.kafka;
 
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;

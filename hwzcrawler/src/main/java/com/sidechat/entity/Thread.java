@@ -1,4 +1,4 @@
-package com.xavier.sidechat.entity;
+package com.sidechat.entity;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -24,9 +24,9 @@ public class Thread {
 
     @Field(type = FieldType.Date, format = DateFormat.basic_date_time, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSZ")
     Date startDate;
-    Long viewCount;
+    //Long viewCount;
     Long lastPage;
 
-    @Field(type = FieldType.Date, format = DateFormat.basic_date_time, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSZ")
-    Date lastModified;
+//    @Field(type = FieldType.Date, format = DateFormat.basic_date_time, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSZ")
+//    Date lastModified;
 }

@@ -1,10 +1,10 @@
-package com.xavier.sidechat.service;
+package com.sidechat.service;
 
-import com.xavier.sidechat.entity.Image;
-import com.xavier.sidechat.entity.Post;
-import com.xavier.sidechat.entity.Quote;
-import com.xavier.sidechat.entity.Thread;
-import com.xavier.sidechat.kafka.KafkaProducer;
+import com.sidechat.entity.Image;
+import com.sidechat.entity.Post;
+import com.sidechat.entity.Quote;
+import com.sidechat.entity.Thread;
+import com.sidechat.kafka.KafkaProducer;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -17,10 +17,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.net.URL;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
@@ -72,9 +69,9 @@ public class CrawlerService {
 
     /* Collect thread information within top pages */
     private List<Thread> getAllThreadsInTopPages(int pages) {
-        //https://forums.hardwarezone.com.sg/eat-drink-man-woman-16/index%d.html
+        //https://forums.hardwarezone.com.sg/forums/eat-drink-man-woman.16/page-1
 
-        List<Thread> threadList = new ArrayList<>();
+        List<com.sidechat.entity.Thread> threadList = new ArrayList<>();
         for (int i = 1; i <= pages; i++) {
             Document document = null;
             try {
@@ -137,14 +134,14 @@ public class CrawlerService {
                         }
                     }
 
-                    threadList.add(Thread.builder()
+                    threadList.add(com.sidechat.entity.Thread.builder()
                             .id(threadId)
                             .url(threadUrl)
                             .title(title)
                             .creator(threadStarter)
                             .startDate(threadStartDate)
-                            .lastModified(threadLastModifiedDate)
-                            .viewCount(viewCount)
+                            //.lastModified(threadLastModifiedDate)
+                            //.viewCount(viewCount)
                             .lastPage(lastPage)
                             .build());
                 }
@@ -158,12 +155,12 @@ public class CrawlerService {
     /* Extract individual post information */
     private Optional<Post> extractPostInfo(Element postElement, Thread thread) {
         try {
-            Long id = Long.parseLong(postElement.attr("data-content").split("-")[1]);
+            long id = Long.parseLong(postElement.attr("data-content").split("-")[1]);
             String author = postElement.attr("data-author");
 
             // 3 user extra info, 1. joined, 2. messages, 3. reaction
             Elements userExtraInfo = postElement.select("div.message-userExtras > dl");
-            Long authorPostCount = Long.parseLong(
+            long authorPostCount = Long.parseLong(
                     userExtraInfo.get(1)//??
                             .select("dd").text()
                             .replace(",", ""));
@@ -179,6 +176,7 @@ public class CrawlerService {
 
             Element bodyElement = postElement.select("div.bbWrapper").first();
 
+            assert bodyElement != null;
             String text = bodyElement.text();
             String html = bodyElement.html();
 
@@ -186,24 +184,6 @@ public class CrawlerService {
             for (Element e : bodyElement.select("div.bbImageWrapper")) {
                 // foreach image, download from data-src and putObject into MinIO
                 URL mediaUrl = new URL(e.attr("data-src"));
-
-//                HttpURLConnection headMediaUrlConnection = (HttpURLConnection) mediaUrl.openConnection();
-//                headMediaUrlConnection.setRequestMethod("HEAD");
-//                headMediaUrlConnection.connect();
-//                int contentLength = headMediaUrlConnection.getContentLength();
-//                headMediaUrlConnection.disconnect();
-//
-//                // check contentLength is not valid, download and saveObject
-//                try(InputStream in = mediaUrl.openStream()){
-//                    if(!minioClient.bucketExists(BucketExistsArgs.builder().bucket(thread.getId()).build())) {
-//                        minioClient.makeBucket(MakeBucketArgs.builder().bucket(thread.getId()).build());
-//                    }
-//                    minioClient.putObject(PutObjectArgs.builder()
-//                            .bucket(thread.getId())
-//                            .object(e.attr("title"))
-//                            .stream(in, contentLength, -1)
-//                            .build());
-//                }
 
                 // prepare metadata for images[]
                 imageList.add(new Image(
@@ -242,7 +222,7 @@ public class CrawlerService {
 
             Post post = Post.newBuilder()
                     .setId(id)
-                    .setThreadId(thread.getId())
+                    .setThreadId(Long.parseLong(thread.getId()))
                     .setThreadTitle(thread.getTitle())
                     .setLocalPostId(localPostId)
                     .setAuthor(author)
@@ -314,7 +294,7 @@ public class CrawlerService {
         if(thread.getLastPage() > crawlThreadMaxPage) {
             return new ArrayList<>();
         }
-        return StreamSupport.stream(LongStream.range(1, thread.getLastPage()).spliterator(), false)
+        return StreamSupport.stream(LongStream.range(1, thread.getLastPage()+1).spliterator(), false)
                 .map(pageNum -> this.processThreadPage(thread, pageNum))
                 .flatMap(posts -> posts.stream())
                 .collect(Collectors.toList());
@@ -335,5 +315,44 @@ public class CrawlerService {
                 }
             }
         };
+    }
+
+    public Optional<Thread> getThreadInfo(String threadId) {
+        //https://forums.hardwarezone.com.sg/threads/this-meow-meow-is-a-professional-lol.6832604/
+        //https://forums.hardwarezone.com.sg/threads/6832604/page-1
+
+        String threadUrl = String.format(crawlThreadUrl, String.format("threads/%s/", threadId));
+
+        Document document = null;
+        try {
+            document = Jsoup.connect(threadUrl)
+                    .userAgent(USER_AGENT)
+                    .get();
+
+            String title = document.select("h1.p-title-value").text();
+            String creator = document.select("div.p-description > ul > li > a.username").text();
+            Date threadCreatedDate = new Date(Long.parseLong(
+                    document.select("div.p-description > ul > li > a > time")
+                            .attr("data-time")) * 1000);
+
+            Elements pageNav = document.select("div.pageNav > ul.pageNav-main > li");
+            long lastPage = 1;
+            if(!pageNav.isEmpty()) {
+                lastPage = Long.parseLong(Objects.requireNonNull(pageNav.last()).text());
+            }
+
+            return Optional.of(Thread.builder()
+                    .id(threadId)
+                    .url(threadUrl)
+                    .title(title)
+                    .creator(creator)
+                    .startDate(threadCreatedDate)
+                    .lastPage(lastPage)
+                    .build());
+
+        } catch (Exception e) {
+            log.error(e.getMessage());
+            return Optional.empty();
+        }
     }
 }

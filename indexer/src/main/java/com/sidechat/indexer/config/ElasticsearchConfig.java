@@ -1,4 +1,4 @@
-package com.xavier.sidechat.config;
+package com.sidechat.indexer.config;
 
 import org.elasticsearch.client.RestHighLevelClient;
 import org.springframework.beans.factory.annotation.Value;

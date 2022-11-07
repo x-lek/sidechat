@@ -1,6 +1,6 @@
-package com.xavier.sidechat.kafka;
+package com.sidechat.kafka;
 
-import com.xavier.sidechat.entity.Post;
+import com.sidechat.entity.Post;
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;

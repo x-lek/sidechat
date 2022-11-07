@@ -1,4 +1,4 @@
-package com.xavier.sidechat.config;
+package com.sidechat.indexer.config;
 
 import io.minio.MinioClient;
 import org.springframework.beans.factory.annotation.Value;

@@ -5,6 +5,7 @@
 	<packaging>pom</packaging>
 	<modules>
 		<module>hwzcrawler</module>
+		<module>indexer</module>
 	</modules>
 	<parent>
 		<groupId>org.springframework.boot</groupId>
@@ -12,10 +13,9 @@
 		<version>2.7.4</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.xavier</groupId>
+	<groupId>com.sidechat</groupId>
 	<artifactId>sidechat</artifactId>
 	<version>1.0</version>
-	<description>-</description>
 
 	<properties>
 		<java.version>14</java.version>
@@ -30,18 +30,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-devtools</artifactId>
-			<scope>runtime</scope>
-			<optional>true</optional>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-devtools</artifactId>
-			<scope>runtime</scope>
-			<optional>true</optional>
-		</dependency>
+<!--		<dependency>-->
+<!--			<groupId>org.springframework.boot</groupId>-->
+<!--			<artifactId>spring-boot-devtools</artifactId>-->
+<!--			<scope>runtime</scope>-->
+<!--			<optional>true</optional>-->
+<!--		</dependency>-->
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
@@ -75,30 +69,10 @@
 			<artifactId>kafka-avro-serializer</artifactId>
 			<version>7.2.2</version>
 		</dependency>
-
 	</dependencies>
-
 	<build>
 		<pluginManagement>
 			<plugins>
-				<plugin>
-					<groupId>org.apache.avro</groupId>
-					<artifactId>avro-maven-plugin</artifactId>
-					<version>1.11.1</version>
-					<executions>
-						<execution>
-							<id>schemas</id>
-							<phase>generate-sources</phase>
-							<goals>
-								<goal>schema</goal>
-							</goals>
-							<configuration>
-								<sourceDirectory>${project.basedir}/src/main/resources/avro/</sourceDirectory>
-								<outputDirectory>${project.build.directory}/generated-sources/avro/</outputDirectory>
-							</configuration>
-						</execution>
-					</executions>
-				</plugin>
 				<plugin>
 					<groupId>org.springframework.boot</groupId>
 					<artifactId>spring-boot-maven-plugin</artifactId>
@@ -124,7 +98,7 @@
 							<image>openjdk:14-jdk</image>
 						</from>
 						<to>
-							<image>registry.gitlab.com/${groupId}/${artifactId}:${version}</image>
+							<image>${groupId}/${artifactId}:${version}</image>
 						</to>
 						<container>
 							<creationTime>USE_CURRENT_TIMESTAMP</creationTime>
@@ -143,12 +117,10 @@
 			</plugins>
 		</pluginManagement>
 	</build>
-
 	<repositories>
 		<repository>
 			<id>confluent</id>
 			<url>https://packages.confluent.io/maven/</url>
 		</repository>
 	</repositories>
-
 </project>
