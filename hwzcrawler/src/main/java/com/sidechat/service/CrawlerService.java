@@ -27,11 +27,11 @@ import java.util.stream.StreamSupport;
 @Service
 public class CrawlerService {
 
-    @Value("${sidechat.crawler.url}")
-    private String crawlUrl;
+    @Value("${hwzcrawler.forum.url}")
+    private String hwzForumUrl;
 
-    @Value("${hwzcrawler.thread.url}")
-    private String crawlThreadUrl;
+    @Value("${hwzcrawler.subforum.url}")
+    private String hwzSubForumUrl;
 
     @Value("${sidechat.crawler.max-thread-page}")
     private Long crawlThreadMaxPage;
@@ -75,7 +75,7 @@ public class CrawlerService {
         for (int i = 1; i <= pages; i++) {
             Document document = null;
             try {
-                String currentPageUrl = String.format(crawlUrl, i);
+                String currentPageUrl = String.format(hwzForumUrl, hwzSubForumUrl) + "/page-" + i;
                 document = Jsoup.connect(currentPageUrl)
                         .userAgent(USER_AGENT)
                         .get();
@@ -86,9 +86,9 @@ public class CrawlerService {
                                     "div.structItem--thread");
 
                 for (Element t : threadsObjects) {
-                    String threadUrl = String.format(crawlThreadUrl,
+                    String threadUrl = String.format(hwzForumUrl,
                             t.select("div.structItem-title > a")
-                                    .attr("href"));
+                                    .attr("href")); // sample text -> /threads/<title>.<threadId>
 
                     String threadId = threadUrl.substring(threadUrl.lastIndexOf('.')+1, threadUrl.length()-1);
 
@@ -321,7 +321,7 @@ public class CrawlerService {
         //https://forums.hardwarezone.com.sg/threads/this-meow-meow-is-a-professional-lol.6832604/
         //https://forums.hardwarezone.com.sg/threads/6832604/page-1
 
-        String threadUrl = String.format(crawlThreadUrl, String.format("threads/%s/", threadId));
+        String threadUrl = String.format(hwzForumUrl, String.format("threads/%s/", threadId));
 
         Document document = null;
         try {
