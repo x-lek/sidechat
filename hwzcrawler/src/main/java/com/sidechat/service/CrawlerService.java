@@ -30,8 +30,8 @@ public class CrawlerService {
     @Value("${hwzcrawler.forum.url}")
     private String hwzForumUrl;
 
-    @Value("${hwzcrawler.subforum.url}")
-    private String hwzSubForumUrl;
+    @Value("${hwzcrawler.subforum.path}")
+    private String hwzSubForumPath;
 
     @Value("${sidechat.crawler.max-thread-page}")
     private Long crawlThreadMaxPage;
@@ -75,7 +75,7 @@ public class CrawlerService {
         for (int i = 1; i <= pages; i++) {
             Document document = null;
             try {
-                String currentPageUrl = String.format(hwzForumUrl, hwzSubForumUrl) + "/page-" + i;
+                String currentPageUrl = hwzForumUrl + hwzSubForumPath + ("/page-" + i);
                 document = Jsoup.connect(currentPageUrl)
                         .userAgent(USER_AGENT)
                         .get();
@@ -86,10 +86,9 @@ public class CrawlerService {
                                     "div.structItem--thread");
 
                 for (Element t : threadsObjects) {
-                    String threadUrl = String.format(hwzForumUrl,
+                    String threadUrl = hwzForumUrl +
                             t.select("div.structItem-title > a")
-                                    .attr("href")); // sample text -> /threads/<title>.<threadId>
-
+                                    .attr("href"); // sample text -> /threads/<title>.<threadId>
                     String threadId = threadUrl.substring(threadUrl.lastIndexOf('.')+1, threadUrl.length()-1);
 
                     String title = t.select("div.structItem-title").text();
@@ -283,6 +282,7 @@ public class CrawlerService {
                     });
 
         } catch (IOException e) {
+            log.error("Unable to process thread page: {}", e.getMessage());
             e.printStackTrace();
         }
         return postListByPage;
@@ -321,7 +321,7 @@ public class CrawlerService {
         //https://forums.hardwarezone.com.sg/threads/this-meow-meow-is-a-professional-lol.6832604/
         //https://forums.hardwarezone.com.sg/threads/6832604/page-1
 
-        String threadUrl = String.format(hwzForumUrl, String.format("threads/%s/", threadId));
+        String threadUrl = hwzForumUrl + String.format("/threads/%s/", threadId);
 
         Document document = null;
         try {

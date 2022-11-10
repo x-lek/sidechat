@@ -59,25 +59,15 @@ public class KafkaConsumer {
                             .object(image.getTitle())
                             .stream(in, contentLength, -1)
                             .build());
-                } catch (ServerException e) {
-                    throw new RuntimeException(e);
-                } catch (InsufficientDataException e) {
-                    throw new RuntimeException(e);
-                } catch (ErrorResponseException e) {
-                    throw new RuntimeException(e);
-                } catch (NoSuchAlgorithmException e) {
-                    throw new RuntimeException(e);
-                } catch (InvalidKeyException e) {
-                    throw new RuntimeException(e);
-                } catch (InvalidResponseException e) {
-                    throw new RuntimeException(e);
-                } catch (XmlParserException e) {
-                    throw new RuntimeException(e);
-                } catch (InternalException e) {
+                } catch (ServerException | NoSuchAlgorithmException | InsufficientDataException |
+                         ErrorResponseException | InvalidKeyException | InvalidResponseException | XmlParserException |
+                         InternalException e) {
+                    log.error(e.getMessage());
                     throw new RuntimeException(e);
                 }
 
             } catch (IOException e) {
+                log.error(e.getMessage());
                 throw new RuntimeException(e);
             }
         });
